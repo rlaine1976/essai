@@ -37,8 +37,8 @@ class ichiV1_MA(IStrategy):
         "buy_min_fan_magnitude_gain": 1.000,
         "buy_trend_above_senkou_level": 1,
         "buy_trend_bullish_level": 1,
-        "buy_ma_fast_period": 9,
-        "buy_ma_slow_period": 21,
+        "buy_ma_fast_period": 20,
+        "buy_ma_slow_period": 60,
     }
     sell_params = {
         "sell_trend_indicator": "trend_close_30m",
