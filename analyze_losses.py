@@ -14,11 +14,26 @@ Usage:
 import argparse
 import json
 import sys
+import zipfile
 from collections import Counter
 from pathlib import Path
 
 
 def load_result(path: Path) -> dict:
+    # Depuis freqtrade 2024+, les résultats de backtest sont zippés.
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path) as zf:
+            names = [n for n in zf.namelist() if n.endswith(".json")]
+            # Priorité au fichier qui porte le même nom que l'archive
+            # (evite d'accidentellement prendre un config.json embarqué).
+            preferred = [n for n in names if Path(n).stem == path.stem]
+            target = preferred[0] if preferred else (
+                [n for n in names if "config" not in n.lower()][0] if names else None
+            )
+            if target is None:
+                sys.exit(f"Aucun .json trouvé dans l'archive {path}")
+            with zf.open(target) as f:
+                return json.load(f)
     with open(path) as f:
         return json.load(f)
 
@@ -31,9 +46,12 @@ def find_latest(backtest_dir: Path) -> Path:
         latest = data.get("latest_backtest")
         if latest:
             return backtest_dir / latest
-    # fallback: fichier le plus récent
-    candidates = sorted(backtest_dir.glob("backtest-result-*.json"))
+    # fallback: fichier le plus récent (zip désormais, json dans les anciennes versions)
+    candidates = sorted(backtest_dir.glob("backtest-result-*.zip")) + sorted(
+        backtest_dir.glob("backtest-result-*.json")
+    )
     candidates = [c for c in candidates if not c.name.endswith(".meta.json")]
+    candidates.sort(key=lambda p: p.stat().st_mtime)
     if not candidates:
         sys.exit(f"Aucun résultat de backtest trouvé dans {backtest_dir}")
     return candidates[-1]
