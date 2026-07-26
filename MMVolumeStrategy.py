@@ -11,7 +11,7 @@ ACHAT (entrée long) :
     (TREND_MA_PERIOD), pour n'acheter que dans un marché haussier confirmé
 
 VENTE (sortie long) :
-  - Uniquement via ROI (take-profit paliers) et stoploss — voir NOTE.
+  - Uniquement via ROI (take-profit paliers) et stoploss fixe — voir NOTE.
 
 Hypothèses faites faute de précision (facilement modifiables ci-dessous) :
   - "moyenne mobile" = SMA simple, période 20 (MA_PERIOD)
@@ -47,19 +47,30 @@ NOTE — historique des ajustements (backtests sur BTC/ETH/SOL/XRP-USDC,
      -1219.68 USDC (contre 22 trades et -608.91 USDC à -10%), pour un gain
      ROI à peine plus élevé (+116 USDC). Sur ce timeframe 5m, un stop fixe à
      -5% coupe trop de trades sur du simple bruit avant qu'ils n'atteignent
-     le ROI. Un -10% universel n'est pas non plus idéal : trop large sur les
-     paires calmes, potentiellement trop serré sur les paires volatiles.
-  6) Stoploss remplacé par un stop dynamique basé sur l'ATR, multiplicateur
-     2.5x : catastrophique, -90.86%, 4750 trades (10x plus qu'avant), durée
-     moyenne 45 minutes. Sur 5m, l'ATR ne représente qu'une toute petite
-     fraction du prix (souvent 0.1-0.3%), donc 2.5x ATR donnait une distance
-     de stop autour de 0.3-0.8% au lieu des -10% attendus — les trades se
-     faisaient stopper quasi instantanément, se rachetaient aussitôt (signal
-     toujours vrai), et ainsi de suite en boucle.
-  7) Multiplicateur ATR augmenté significativement (voir valeur ci-dessous)
-     pour retrouver une distance de stop comparable aux -10% qui
-     fonctionnaient, tout en gardant l'adaptation par paire/volatilité. À
-     backtester.
+     le ROI.
+  6) Stop dynamique basé sur l'ATR, multiplicateur 2.5x : catastrophique,
+     -90.86%, 4750 trades (10x plus qu'avant), durée moyenne 45 minutes.
+     L'ATR sur 5m ne représentait qu'une toute petite fraction du prix
+     (0.1-0.3%), donc 2.5x ATR donnait un stop à ~0.3-0.8% au lieu des -10%
+     attendus — trades stoppés quasi instantanément puis rachetés en boucle.
+  7) Multiplicateur ATR augmenté à 20x : -26.96%, mieux que 2.5x (571 trades
+     au lieu de 4750) mais toujours pire que le -10% fixe (-13.02%) — le stop
+     moyen obtenu (-4.2%) restait plus serré et coupait encore trop de trades
+     sur du bruit.
+  Conclusion : sur ces paires et cette période, le stop fixe à -10% reste la
+  meilleure configuration testée. Le stop dynamique ATR a été abandonné (code
+  retiré) faute d'avantage démontré. Stoploss remis à -10%.
+
+  8) Ajout d'un trailing stop par-dessus le stoploss -10% : dans tous les
+     backtests précédents, les sorties ROI gagnaient souvent (58-78% de
+     trades) mais pour des gains modestes (+0.13 à +0.27% en moyenne, car
+     plafonnés par les paliers ROI), alors que les pertes étaient nettement
+     plus lourdes par trade. Le trailing stop vise à sécuriser une partie du
+     gain sur les trades qui montent puis redescendent, avant qu'ils ne
+     retombent jusqu'au stoploss complet. Activé à partir de +3% de profit
+     (TRAILING_STOP_POSITIVE_OFFSET), il suit ensuite le prix à 2% de
+     distance (TRAILING_STOP_POSITIVE). En dessous de +3%, le stoploss fixe à
+     -10% reste seul filet de sécurité. À backtester.
 
   Il reste aussi à vérifier si la perte vient de la logique elle-même ou du
   fait que le marché était globalement baissier (-11.82%) sur cette période :
@@ -69,12 +80,9 @@ NOTE — historique des ajustements (backtests sur BTC/ETH/SOL/XRP-USDC,
   freqtrade backtesting --strategy MMVolumeStrategy --timeframe 5m
 """
 
-from datetime import datetime
-
 import talib.abstract as ta
 from pandas import DataFrame
 
-from freqtrade.persistence import Trade
 from freqtrade.strategy import IStrategy
 
 
@@ -88,41 +96,32 @@ class MMVolumeStrategy(IStrategy):
     # Période de la moyenne mobile longue (filtre de tendance)
     TREND_MA_PERIOD = 100
 
-    # Période de l'ATR (mesure de volatilité) pour le stop dynamique
-    ATR_PERIOD = 14
-
-    # Distance du stop = ATR × ce multiplicateur, en % du prix d'entrée.
-    # 2.5 était beaucoup trop faible sur 5m (stop à ~0.5% au lieu de ~10%,
-    # voir NOTE) — valeur augmentée pour retrouver une distance raisonnable.
-    ATR_STOPLOSS_MULTIPLIER = 20
-
     # ROI / stoploss / timeframe — à ajuster selon votre profil de risque.
-    # Le ROI et le stop (dynamique, voir custom_stoploss) sont désormais les
-    # SEULES sorties de la stratégie (pas de signal de vente basé sur les
-    # bougies — voir NOTE en tête de fichier).
+    # Ce sont les SEULES sorties de la stratégie (pas de signal de vente basé
+    # sur les bougies, pas de stop ATR — voir NOTE en tête de fichier).
     minimal_roi = {
         "0": 0.10,
         "30": 0.05,
         "60": 0.02,
         "120": 0
     }
-
-    # Filet de sécurité si l'ATR est indisponible (ex: tout début de trade) —
-    # c'est aussi la pire perte possible autorisée, custom_stoploss ne peut
-    # jamais aller au-delà de cette valeur.
     stoploss = -0.10
-    trailing_stop = False
 
-    # Stop dynamique basé sur l'ATR (remplace le -10% fixe pour la plupart
-    # des trades) — voir custom_stoploss ci-dessous et NOTE en tête de fichier
-    use_custom_stoploss = True
+    # Trailing stop : s'active à +3% de profit, puis suit le prix à 2% de
+    # distance. En dessous de +3%, seul le stoploss fixe -10% protège le
+    # trade (trailing_only_offset_is_reached=True) — voir NOTE en tête de
+    # fichier.
+    trailing_stop = True
+    trailing_stop_positive = 0.02
+    trailing_stop_positive_offset = 0.03
+    trailing_only_offset_is_reached = True
 
     timeframe = "5m"
 
     # Pas de logique de sortie basée sur signal : ROI + stoploss uniquement
     use_exit_signal = False
 
-    startup_candle_count: int = max(MA_PERIOD, TREND_MA_PERIOD, ATR_PERIOD) + 5
+    startup_candle_count: int = max(MA_PERIOD, TREND_MA_PERIOD) + 5
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Moyenne mobile simple
@@ -140,9 +139,6 @@ class MMVolumeStrategy(IStrategy):
 
         # Volume ascendant (bougie en cours > bougie précédente)
         dataframe["volume_rising"] = dataframe["volume"] > dataframe["volume"].shift(1)
-
-        # ATR — mesure de volatilité récente, utilisée par custom_stoploss
-        dataframe["atr"] = ta.ATR(dataframe, timeperiod=self.ATR_PERIOD)
 
         return dataframe
 
@@ -164,38 +160,3 @@ class MMVolumeStrategy(IStrategy):
         # (use_exit_signal = False ci-dessus). Méthode conservée car requise
         # par l'interface IStrategy.
         return dataframe
-
-    def custom_stoploss(
-        self,
-        pair: str,
-        trade: Trade,
-        current_time: datetime,
-        current_rate: float,
-        current_profit: float,
-        **kwargs,
-    ) -> float:
-        """
-        Stop dynamique basé sur l'ATR au moment de l'entrée : plus la paire
-        est volatile à cet instant, plus le stop est large, et inversement.
-        Ne bouge pas ensuite (pas un trailing stop) — juste une distance
-        adaptée par trade au lieu d'un -10% universel.
-        """
-        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        if dataframe is None or dataframe.empty:
-            return self.stoploss
-
-        candles_before_entry = dataframe.loc[dataframe["date"] <= trade.open_date_utc]
-        if candles_before_entry.empty:
-            return self.stoploss
-
-        atr_value = candles_before_entry.iloc[-1]["atr"]
-        if atr_value is None or atr_value != atr_value or atr_value <= 0:
-            # atr_value != atr_value détecte un NaN sans dépendance à numpy/pandas
-            return self.stoploss
-
-        stop_distance = (atr_value * self.ATR_STOPLOSS_MULTIPLIER) / trade.open_rate
-
-        # Le stop dynamique ne doit jamais être plus large que le filet de
-        # sécurité statique (self.stoploss est négatif, donc "plus large" =
-        # plus négatif que lui)
-        return max(-stop_distance, self.stoploss)
