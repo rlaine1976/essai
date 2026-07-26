@@ -11,10 +11,11 @@ ACHAT (entrée long) :
     (TREND_MA_PERIOD), pour n'acheter que dans un marché haussier confirmé
 
 VENTE (sortie long) :
-  - La moyenne mobile "coupe" une bougie baissière : le prix de clôture passe
-    d'au-dessus à en-dessous de la SMA (croisement baissier close/SMA) sur une
-    bougie rouge (close < open)
-  - ET il y a 2 bougies baissières d'affilée (la bougie du croisement + la précédente)
+  - La moyenne mobile "coupe" une bougie baissière : le prix de clôture est
+    passé en-dessous de la SMA
+  - ET il y a BEARISH_CANDLES_REQUIRED (3 par défaut) bougies baissières
+    d'affilée, toutes sous la SMA — confirmation renforcée pour éviter de
+    vendre sur du simple bruit (voir NOTE ci-dessous)
 
 Hypothèses faites faute de précision (facilement modifiables ci-dessous) :
   - "moyenne mobile" = SMA simple, période 20 (MA_PERIOD)
@@ -23,12 +24,18 @@ Hypothèses faites faute de précision (facilement modifiables ci-dessous) :
     volume acheteur/vendeur séparé — c'est donc ce volume qui est utilisé)
   - timeframe : 5m
 
-NOTE : le premier backtest (sans filtre de tendance) donnait -63.67% sur
-2026-04-01 → 2026-07-18, avec un exit_signal gagnant à seulement 0.3% —
-la SMA courte est un indicateur retardé qui achetait des sommets. Le filtre
-de tendance ci-dessus (close > SMA longue) vise à ne prendre les signaux
-d'achat que quand le marché de fond est déjà haussier, pour réduire ces
-faux signaux. À rebacktester pour vérifier l'amélioration.
+NOTE — historique des ajustements :
+  1) Version initiale (2 bougies baissières, sans filtre de tendance) :
+     -63.67% sur 2026-04-01 → 2026-07-18, exit_signal gagnant à 0.3%.
+  2) Ajout du filtre de tendance (close > SMA longue) : -59.28%, amélioration
+     marginale — le vrai problème n'était pas les entrées mais les sorties :
+     503 sorties ROI gagnantes à 66.6% (+218 USDC), contre 1286 sorties
+     exit_signal gagnantes à 0.4% (-2883 USDC). Le signal de vente d'origine
+     confirmait quasi systématiquement une perte déjà entamée plutôt que de
+     sécuriser un gain.
+  3) Version actuelle : signal de vente rendu moins réactif (3 bougies
+     baissières consécutives, toutes sous la SMA, au lieu de 2) pour filtrer
+     le bruit du 5m. À rebacktester pour vérifier l'amélioration.
 
 À tester en backtest avant tout usage en réel :
   freqtrade backtesting --strategy MMVolumeStrategy --timeframe 5m
@@ -49,6 +56,10 @@ class MMVolumeStrategy(IStrategy):
 
     # Période de la moyenne mobile longue (filtre de tendance)
     TREND_MA_PERIOD = 100
+
+    # Nombre de bougies baissières consécutives requises pour vendre
+    # (augmenté de 2 à 3 pour rendre le signal moins réactif au bruit)
+    BEARISH_CANDLES_REQUIRED = 3
 
     # ROI / stoploss / timeframe — à ajuster selon votre profil de risque
     minimal_roi = {
@@ -84,15 +95,17 @@ class MMVolumeStrategy(IStrategy):
         # Volume ascendant (bougie en cours > bougie précédente)
         dataframe["volume_rising"] = dataframe["volume"] > dataframe["volume"].shift(1)
 
-        # Croisement baissier : close était au-dessus de la SMA, passe en-dessous
-        dataframe["cross_down_sma"] = (
-            (dataframe["close"].shift(1) > dataframe["sma"].shift(1))
-            & (dataframe["close"] < dataframe["sma"])
-        )
+        # Close en-dessous de la SMA (confirmation du "croisement")
+        dataframe["below_sma"] = dataframe["close"] < dataframe["sma"]
 
-        # 2 bougies baissières d'affilée
-        dataframe["two_bearish_in_a_row"] = (
-            dataframe["bearish_candle"] & dataframe["bearish_candle"].shift(1)
+        # N bougies baissières d'affilée, toutes sous la SMA (signal de vente
+        # moins réactif que la version initiale — voir NOTE en tête de fichier)
+        n = self.BEARISH_CANDLES_REQUIRED
+        dataframe["bearish_streak"] = (
+            dataframe["bearish_candle"].rolling(n).sum() == n
+        )
+        dataframe["below_sma_streak"] = (
+            dataframe["below_sma"].rolling(n).sum() == n
         )
 
         return dataframe
@@ -113,9 +126,8 @@ class MMVolumeStrategy(IStrategy):
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
             (
-                dataframe["cross_down_sma"]
-                & dataframe["bearish_candle"]
-                & dataframe["two_bearish_in_a_row"]
+                dataframe["bearish_streak"]
+                & dataframe["below_sma_streak"]
             ),
             "exit_long",
         ] = 1
