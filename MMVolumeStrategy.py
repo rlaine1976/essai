@@ -6,7 +6,10 @@ LOGIQUE (telle que demandée, ajustée après backtests — voir NOTE ci-dessous
 ACHAT (entrée long) :
   - La moyenne mobile (SMA) est ascendante depuis 2 bougies
     (sma[t] > sma[t-1] > sma[t-2])
-  - ET le volume est ascendant (volume[t] > volume[t-1])
+  - ET le volume forme un pic nettement au-dessus de sa moyenne récente
+    (volume > VOLUME_SPIKE_MULTIPLIER × moyenne des VOLUME_MA_PERIOD
+    dernières bougies) — remplace le simple "volume > bougie précédente",
+    voir point 10 de la NOTE ci-dessous
   - ET FILTRE DE TENDANCE : le prix de clôture est au-dessus d'une SMA longue
     (TREND_MA_PERIOD), pour n'acheter que dans un marché haussier confirmé
 
@@ -69,7 +72,18 @@ NOTE — historique des ajustements (backtests sur BTC/ETH/SOL/XRP-USDC,
      atteindre le seuil d'activation de +3%. Le trailing stop n'a donc jamais
      eu l'occasion de se déclencher.
   9) Seuils abaissés à +1.5% d'activation / 0.5% de distance, cohérents avec
-     les gains réellement observés sur cette stratégie. À backtester.
+     les gains réellement observés sur cette stratégie : -13.79%, quasiment
+     identique au -13.02% sans trailing stop (14 trades sécurisés à +1.25%
+     en moyenne, 100% gagnants, +45.36 USDC — mais sortir plus tôt libère du
+     capital qui a servi à ouvrir des trades supplémentaires, dont certains
+     perdants, annulant l'essentiel du gain). Conclusion : le trailing stop
+     ne change pas matériellement le résultat sur cette période. Conservé
+     tel quel (pas de régression), mais pas de gain démontré non plus.
+  10) Filtre de volume renforcé : "volume ascendant" (juste > bougie
+      précédente) remplacé par un pic de volume nettement au-dessus de la
+      moyenne (VOLUME_SPIKE_MULTIPLIER × moyenne des VOLUME_MA_PERIOD
+      dernières bougies), pour ne garder que les entrées avec une vraie
+      conviction derrière. À backtester.
 
   Il reste aussi à vérifier si la perte vient de la logique elle-même ou du
   fait que le marché était globalement baissier (-11.82%) sur cette période :
@@ -94,6 +108,12 @@ class MMVolumeStrategy(IStrategy):
 
     # Période de la moyenne mobile longue (filtre de tendance)
     TREND_MA_PERIOD = 100
+
+    # Filtre de volume renforcé : période de la moyenne de volume, et
+    # multiplicateur au-dessus de cette moyenne pour valider un "vrai" pic
+    # de volume (remplace le simple "volume > bougie précédente")
+    VOLUME_MA_PERIOD = 20
+    VOLUME_SPIKE_MULTIPLIER = 1.4
 
     # ROI / stoploss / timeframe — à ajuster selon votre profil de risque.
     # Ce sont les SEULES sorties de la stratégie (pas de signal de vente basé
@@ -121,7 +141,7 @@ class MMVolumeStrategy(IStrategy):
     # Pas de logique de sortie basée sur signal : ROI + stoploss uniquement
     use_exit_signal = False
 
-    startup_candle_count: int = max(MA_PERIOD, TREND_MA_PERIOD) + 5
+    startup_candle_count: int = max(MA_PERIOD, TREND_MA_PERIOD, VOLUME_MA_PERIOD) + 5
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Moyenne mobile simple
@@ -137,8 +157,16 @@ class MMVolumeStrategy(IStrategy):
             & (dataframe["sma"].shift(1) > dataframe["sma"].shift(2))
         )
 
-        # Volume ascendant (bougie en cours > bougie précédente)
+        # Volume ascendant (bougie en cours > bougie précédente) — gardé à
+        # titre indicatif mais plus utilisé pour l'entrée, voir volume_spike
         dataframe["volume_rising"] = dataframe["volume"] > dataframe["volume"].shift(1)
+
+        # Pic de volume : volume nettement au-dessus de sa moyenne récente
+        # (remplace volume_rising dans le signal d'achat — voir NOTE)
+        dataframe["volume_ma"] = dataframe["volume"].rolling(self.VOLUME_MA_PERIOD).mean()
+        dataframe["volume_spike"] = (
+            dataframe["volume"] > dataframe["volume_ma"] * self.VOLUME_SPIKE_MULTIPLIER
+        )
 
         return dataframe
 
@@ -146,7 +174,7 @@ class MMVolumeStrategy(IStrategy):
         dataframe.loc[
             (
                 dataframe["sma_rising_2"]
-                & dataframe["volume_rising"]
+                & dataframe["volume_spike"]
                 & dataframe["uptrend"]
                 & (dataframe["volume"] > 0)
             ),
