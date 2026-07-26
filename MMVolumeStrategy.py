@@ -61,16 +61,15 @@ NOTE — historique des ajustements (backtests sur BTC/ETH/SOL/XRP-USDC,
   meilleure configuration testée. Le stop dynamique ATR a été abandonné (code
   retiré) faute d'avantage démontré. Stoploss remis à -10%.
 
-  8) Ajout d'un trailing stop par-dessus le stoploss -10% : dans tous les
-     backtests précédents, les sorties ROI gagnaient souvent (58-78% de
-     trades) mais pour des gains modestes (+0.13 à +0.27% en moyenne, car
-     plafonnés par les paliers ROI), alors que les pertes étaient nettement
-     plus lourdes par trade. Le trailing stop vise à sécuriser une partie du
-     gain sur les trades qui montent puis redescendent, avant qu'ils ne
-     retombent jusqu'au stoploss complet. Activé à partir de +3% de profit
-     (TRAILING_STOP_POSITIVE_OFFSET), il suit ensuite le prix à 2% de
-     distance (TRAILING_STOP_POSITIVE). En dessous de +3%, le stoploss fixe à
-     -10% reste seul filet de sécurité. À backtester.
+  8) Ajout d'un trailing stop par-dessus le stoploss -10%, activé à +3% de
+     profit puis suivant le prix à 2% de distance : résultat rigoureusement
+     identique au backtest sans trailing stop (-13.02%, mêmes 214 trades,
+     aucune sortie "trailing_stop_loss"). Explication : le meilleur trade de
+     tout le backtest ne dépassait que +2.63% de profit — jamais assez pour
+     atteindre le seuil d'activation de +3%. Le trailing stop n'a donc jamais
+     eu l'occasion de se déclencher.
+  9) Seuils abaissés à +1.5% d'activation / 0.5% de distance, cohérents avec
+     les gains réellement observés sur cette stratégie. À backtester.
 
   Il reste aussi à vérifier si la perte vient de la logique elle-même ou du
   fait que le marché était globalement baissier (-11.82%) sur cette période :
@@ -107,13 +106,14 @@ class MMVolumeStrategy(IStrategy):
     }
     stoploss = -0.10
 
-    # Trailing stop : s'active à +3% de profit, puis suit le prix à 2% de
-    # distance. En dessous de +3%, seul le stoploss fixe -10% protège le
-    # trade (trailing_only_offset_is_reached=True) — voir NOTE en tête de
-    # fichier.
+    # Trailing stop : s'active à +1.5% de profit, puis suit le prix à 0.5%
+    # de distance. En dessous de +1.5%, seul le stoploss fixe -10% protège
+    # le trade (trailing_only_offset_is_reached=True) — voir NOTE en tête de
+    # fichier (seuil abaissé après un 1er essai à 3%/2% qui ne s'est jamais
+    # déclenché : le meilleur trade du backtest ne dépassait que +2.63%).
     trailing_stop = True
-    trailing_stop_positive = 0.02
-    trailing_stop_positive_offset = 0.03
+    trailing_stop_positive = 0.005
+    trailing_stop_positive_offset = 0.015
     trailing_only_offset_is_reached = True
 
     timeframe = "5m"
