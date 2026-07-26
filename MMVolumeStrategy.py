@@ -38,7 +38,14 @@ NOTE — historique des ajustements (backtests sur BTC/ETH/SOL/XRP-USDC,
   sorties ROI (take-profit) et le stoploss gèrent maintenant les sorties.
   Le filtre de tendance sur les achats a été conservé.
 
-  Cette version n'a pas encore été backtestée — à faire avant tout usage réel.
+  4) Backtest de cette version (ROI + stoploss -10%, sans signal de vente) :
+     -13.02% — très proche du marché (-11.82%), cohérent pour une stratégie
+     long-only sur marché baissier. Détail : 188 sorties ROI gagnantes à
+     62.2% (+65 USDC), mais 22 sorties stoploss à -10.72% chacune (-608.91
+     USDC) — le stoploss à -10% était trop large et a effacé le gain du ROI.
+  5) Stoploss resserré de -10% à -5% pour limiter la casse par trade (voir
+     valeur ci-dessous). À rebacktester pour confirmer l'amélioration.
+
   Il reste aussi à vérifier si la perte vient de la logique elle-même ou du
   fait que le marché était globalement baissier (-11.82%) sur cette période :
   tester sur une autre période/d'autres paires est recommandé.
@@ -72,7 +79,7 @@ class MMVolumeStrategy(IStrategy):
         "60": 0.02,
         "120": 0
     }
-    stoploss = -0.10
+    stoploss = -0.05
     trailing_stop = False
 
     timeframe = "5m"
