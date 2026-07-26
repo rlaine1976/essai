@@ -49,11 +49,17 @@ NOTE — historique des ajustements (backtests sur BTC/ETH/SOL/XRP-USDC,
      -5% coupe trop de trades sur du simple bruit avant qu'ils n'atteignent
      le ROI. Un -10% universel n'est pas non plus idéal : trop large sur les
      paires calmes, potentiellement trop serré sur les paires volatiles.
-  6) Stoploss remplacé par un stop dynamique basé sur l'ATR (volatilité
-     récente de chaque paire) : distance = ATR_STOPLOSS_MULTIPLIER × ATR au
-     moment de l'entrée, exprimée en % du prix d'entrée. Le stoploss fixe à
-     -10% (STATIC_STOPLOSS_FLOOR) reste un filet de sécurité si l'ATR est
-     indisponible. À backtester pour comparer au -10% fixe.
+  6) Stoploss remplacé par un stop dynamique basé sur l'ATR, multiplicateur
+     2.5x : catastrophique, -90.86%, 4750 trades (10x plus qu'avant), durée
+     moyenne 45 minutes. Sur 5m, l'ATR ne représente qu'une toute petite
+     fraction du prix (souvent 0.1-0.3%), donc 2.5x ATR donnait une distance
+     de stop autour de 0.3-0.8% au lieu des -10% attendus — les trades se
+     faisaient stopper quasi instantanément, se rachetaient aussitôt (signal
+     toujours vrai), et ainsi de suite en boucle.
+  7) Multiplicateur ATR augmenté significativement (voir valeur ci-dessous)
+     pour retrouver une distance de stop comparable aux -10% qui
+     fonctionnaient, tout en gardant l'adaptation par paire/volatilité. À
+     backtester.
 
   Il reste aussi à vérifier si la perte vient de la logique elle-même ou du
   fait que le marché était globalement baissier (-11.82%) sur cette période :
@@ -85,8 +91,10 @@ class MMVolumeStrategy(IStrategy):
     # Période de l'ATR (mesure de volatilité) pour le stop dynamique
     ATR_PERIOD = 14
 
-    # Distance du stop = ATR × ce multiplicateur, en % du prix d'entrée
-    ATR_STOPLOSS_MULTIPLIER = 2.5
+    # Distance du stop = ATR × ce multiplicateur, en % du prix d'entrée.
+    # 2.5 était beaucoup trop faible sur 5m (stop à ~0.5% au lieu de ~10%,
+    # voir NOTE) — valeur augmentée pour retrouver une distance raisonnable.
+    ATR_STOPLOSS_MULTIPLIER = 20
 
     # ROI / stoploss / timeframe — à ajuster selon votre profil de risque.
     # Le ROI et le stop (dynamique, voir custom_stoploss) sont désormais les
