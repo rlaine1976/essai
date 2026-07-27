@@ -196,7 +196,56 @@ class ichiV1(IStrategy):
         dataframe['cloud_green'] = ichimoku['cloud_green']
         dataframe['cloud_red'] = ichimoku['cloud_red']
         dataframe['atr'] = ta.ATR(dataframe)
+
+        # SUIVI TELEGRAM (27 juillet 2026) : notifie le nombre de conditions
+        # d'entrée actuellement validées sur les 6 nécessaires, pour suivre
+        # la progression vers un signal d'achat sans attendre qu'il se
+        # déclenche. Envoie un message uniquement quand le compte change
+        # (pas à chaque itération) pour éviter le spam. self.dp.send_msg()
+        # ne fait rien en backtest/hyperopt, seulement en live/dry-run.
+        self._notify_entry_conditions(dataframe, metadata['pair'])
+
         return dataframe
+
+    def _notify_entry_conditions(self, dataframe: DataFrame, pair: str) -> None:
+        if dataframe.empty:
+            return
+        last = dataframe.iloc[-1]
+
+        timeframes = ['5m', '15m', '30m', '1h', '2h', '4h']
+        senkou_ok = sum(
+            1 for tf in timeframes
+            if last[f'trend_close_{tf}'] > last['senkou_a'] and last[f'trend_close_{tf}'] > last['senkou_b']
+        )
+        bullish_ok = sum(
+            1 for tf in timeframes
+            if last[f'trend_close_{tf}'] > last[f'trend_open_{tf}']
+        )
+        fan_conditions = [
+            last['fan_magnitude_gain'] >= self.buy_params['buy_min_fan_magnitude_gain'],
+            last['fan_magnitude'] > 1,
+        ]
+        for x in range(self.buy_params['buy_fan_magnitude_shift_value']):
+            fan_conditions.append(dataframe['fan_magnitude'].shift(x + 1).iloc[-1] < last['fan_magnitude'])
+        fan_ok = all(bool(c) for c in fan_conditions)
+
+        if not hasattr(self, '_last_condition_counts'):
+            self._last_condition_counts = {}
+
+        current = (senkou_ok, bullish_ok, fan_ok)
+        if self._last_condition_counts.get(pair) == current:
+            return
+        self._last_condition_counts[pair] = current
+
+        senkou_needed = self.buy_params['buy_trend_above_senkou_level']
+        bullish_needed = self.buy_params['buy_trend_bullish_level']
+        self.dp.send_msg(
+            f"[{pair}] ichiV1 — conditions d'entrée : "
+            f"nuage {senkou_ok}/6 (seuil {senkou_needed}) · "
+            f"tendance haussière {bullish_ok}/6 (seuil {bullish_needed}) · "
+            f"momentum {'OK' if fan_ok else 'non'}"
+        )
+
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
         # Trending market
