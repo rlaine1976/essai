@@ -221,29 +221,43 @@ class ichiV1(IStrategy):
             1 for tf in timeframes
             if last[f'trend_close_{tf}'] > last[f'trend_open_{tf}']
         )
-        fan_conditions = [
-            last['fan_magnitude_gain'] >= self.buy_params['buy_min_fan_magnitude_gain'],
-            last['fan_magnitude'] > 1,
-        ]
-        for x in range(self.buy_params['buy_fan_magnitude_shift_value']):
-            fan_conditions.append(dataframe['fan_magnitude'].shift(x + 1).iloc[-1] < last['fan_magnitude'])
-        fan_ok = all(bool(c) for c in fan_conditions)
+        # Détail des 3 sous-conditions du momentum (fan_magnitude), pour voir
+        # précisément laquelle bloque quand le momentum global est "non" :
+        #   1) gain_ok      : l'écart EMA1h/EMA8h s'élargit d'au moins 0.2%
+        #                     vs la bougie précédente (buy_min_fan_magnitude_gain)
+        #   2) above_1_ok   : l'EMA 1h est déjà au-dessus de l'EMA 8h
+        #                     (tendance haussière moyen terme déjà installée)
+        #   3) shift_ok     : accélération sur les N dernières bougies
+        #                     (buy_fan_magnitude_shift_value)
+        gain_ok = bool(last['fan_magnitude_gain'] >= self.buy_params['buy_min_fan_magnitude_gain'])
+        above_1_ok = bool(last['fan_magnitude'] > 1)
+        shift_ok = all(
+            bool(dataframe['fan_magnitude'].shift(x + 1).iloc[-1] < last['fan_magnitude'])
+            for x in range(self.buy_params['buy_fan_magnitude_shift_value'])
+        )
+        fan_ok = gain_ok and above_1_ok and shift_ok
 
         if not hasattr(self, '_last_condition_counts'):
             self._last_condition_counts = {}
 
-        current = (senkou_ok, bullish_ok, fan_ok)
+        current = (senkou_ok, bullish_ok, gain_ok, above_1_ok, shift_ok)
         if self._last_condition_counts.get(pair) == current:
             return
         self._last_condition_counts[pair] = current
 
         senkou_needed = self.buy_params['buy_trend_above_senkou_level']
         bullish_needed = self.buy_params['buy_trend_bullish_level']
+
+        def flag(ok: bool) -> str:
+            return 'OK' if ok else 'non'
+
         self.dp.send_msg(
             f"[{pair}] ichiV1 — conditions d'entrée : "
             f"nuage {senkou_ok}/6 (seuil {senkou_needed}) · "
             f"tendance haussière {bullish_ok}/6 (seuil {bullish_needed}) · "
-            f"momentum {'OK' if fan_ok else 'non'}"
+            f"momentum {flag(fan_ok)} "
+            f"(écart+0.2% {flag(gain_ok)} / EMA1h>EMA8h {flag(above_1_ok)} / "
+            f"accélération {flag(shift_ok)} — ratio={last['fan_magnitude']:.4f})"
         )
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
