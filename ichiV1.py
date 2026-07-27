@@ -71,8 +71,21 @@ class ichiV1(IStrategy):
     # ne pourra désormais se déclencher QUE si le trade est déjà profitable —
     # il servira à sécuriser un gain avant qu'il ne s'évapore, au lieu de
     # pouvoir couper un trade en perte comme c'était le cas (94.6% des
-    # sorties par signal étaient perdantes). Les trades en perte continueront
-    # jusqu'au ROI ou au stoploss. À rebacktester pour confirmer l'amélioration.
+    # sorties par signal étaient perdantes).
+    #
+    # RÉSULTAT : ce changement a dégradé la performance (+9.26% au lieu de
+    # +16.20%, Sharpe 0.66 au lieu de 2.96). Explication : le signal de vente,
+    # malgré son faible taux de réussite, servait en réalité de coupe-perte
+    # précoce (355 sorties à -1.11% en moyenne, -1139.87 USDC au total). En
+    # l'empêchant de couper les trades perdants, ceux-ci restent ouverts
+    # jusqu'au stoploss (-27.5%, très large) : seulement 13 trades ont fini
+    # au stoploss, mais à -28.08% de moyenne chacun (-1067.34 USDC au total)
+    # — une perte totale similaire, concentrée sur beaucoup moins de trades
+    # avec un risque par trade bien plus violent (pire trade : -28.08%).
+    #
+    # AJUSTEMENT (27 juillet 2026) : stoploss resserré de -27.5% à -8% pour
+    # limiter la casse maintenant que le signal ne le fait plus sur les
+    # trades perdants. À rebacktester.
 
     INTERFACE_VERSION = 3
 
@@ -97,7 +110,7 @@ class ichiV1(IStrategy):
         "114": 0
     }
     # Stoploss:
-    stoploss = -0.275
+    stoploss = -0.08  # était -0.275 — voir NOTE en tête de fichier
     # Optimal timeframe for the strategy
     timeframe = '5m'
     startup_candle_count = 96
