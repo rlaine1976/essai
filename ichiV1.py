@@ -85,7 +85,17 @@ class ichiV1(IStrategy):
     #
     # AJUSTEMENT (27 juillet 2026) : stoploss resserré de -27.5% à -8% pour
     # limiter la casse maintenant que le signal ne le fait plus sur les
-    # trades perdants. À rebacktester.
+    # trades perdants. Résultat : mieux que la combinaison précédente
+    # (+14.56%, Sharpe 1.75, drawdown 2.40%), mais toujours en dessous de la
+    # configuration d'origine (+16.20%, Sharpe 2.96, drawdown 1.93%).
+    #
+    # CONCLUSION (27 juillet 2026) : sur 3 configurations testées, l'origine
+    # (exit_profit_only=False, stoploss=-27.5%) reste la meilleure. Le signal
+    # de vente, malgré un faible taux de réussite affiché isolément (5.4%),
+    # apportait une vraie valeur en tant que coupe-perte rapide sur les
+    # trades perdants — un stoploss large derrière lui ne servait
+    # quasiment jamais. Revert : exit_profit_only -> False, stoploss ->
+    # -0.275 (valeurs d'origine).
 
     INTERFACE_VERSION = 3
 
@@ -110,7 +120,7 @@ class ichiV1(IStrategy):
         "114": 0
     }
     # Stoploss:
-    stoploss = -0.08  # était -0.275 — voir NOTE en tête de fichier
+    stoploss = -0.275
     # Optimal timeframe for the strategy
     timeframe = '5m'
     startup_candle_count = 96
@@ -120,7 +130,7 @@ class ichiV1(IStrategy):
     #trailing_stop_positive_offset = 0.025
     #trailing_only_offset_is_reached = True
     use_exit_signal = True
-    exit_profit_only = True  # était False — voir NOTE en tête de fichier
+    exit_profit_only = False
     ignore_roi_if_entry_signal = False
     plot_config = {
         'main_plot': {
