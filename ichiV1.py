@@ -56,6 +56,23 @@ class ichiV1(IStrategy):
     # À REBACKTESTER avant de relancer en dry-run, pour comparer le nombre de
     # trades et le win rate à la version d'origine (level=6/6, shift=3).
     # -------------------------------------------------------------------------
+    #
+    # RÉSULTAT du backtest avec ces réglages assouplis (2024-01-01 -> 2026-07-
+    # 18, BTC/ETH/SOL/XRP-USDC) : +16.20% de profit total (marché à -21.95%
+    # sur la même période), 0.87 trade/jour, Sharpe 2.96, drawdown max 1.93%.
+    # Détail par raison de sortie : les 452 sorties ROI sont excellentes
+    # (92.9% gagnantes, +41.53% de contribution), mais les 355 sorties par
+    # exit_signal (croisement trend_close_5m sous trend_close_2h) sont
+    # mauvaises (5.4% gagnantes, -25.33% de contribution) — le signal de
+    # vente mange une bonne partie du gain généré par le ROI.
+    #
+    # AMÉLIORATION DU SIGNAL DE SORTIE (27 juillet 2026) :
+    # exit_profit_only passé à True. Le signal de vente (croisement baissier)
+    # ne pourra désormais se déclencher QUE si le trade est déjà profitable —
+    # il servira à sécuriser un gain avant qu'il ne s'évapore, au lieu de
+    # pouvoir couper un trade en perte comme c'était le cas (94.6% des
+    # sorties par signal étaient perdantes). Les trades en perte continueront
+    # jusqu'au ROI ou au stoploss. À rebacktester pour confirmer l'amélioration.
 
     INTERFACE_VERSION = 3
 
@@ -90,7 +107,7 @@ class ichiV1(IStrategy):
     #trailing_stop_positive_offset = 0.025
     #trailing_only_offset_is_reached = True
     use_exit_signal = True
-    exit_profit_only = False
+    exit_profit_only = True  # était False — voir NOTE en tête de fichier
     ignore_roi_if_entry_signal = False
     plot_config = {
         'main_plot': {
