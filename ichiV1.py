@@ -104,9 +104,29 @@ class ichiV1(IStrategy):
         "buy_trend_above_senkou_level": 3,   # était 6
         "buy_trend_bullish_level": 3,        # était 6
         "buy_fan_magnitude_shift_value": 1,  # était 3
-        "buy_min_fan_magnitude_gain": 1.002  # NOTE: Good value (Win% ~70%), alot of trades
+        "buy_min_fan_magnitude_gain": 1.0005,  # était 1.002 — assoupli 27/07/2026 (voir NOTE momentum)
+        #"buy_min_fan_magnitude_gain": 1.002 # NOTE: Good value (Win% ~70%), alot of trades
         #"buy_min_fan_magnitude_gain": 1.008 # NOTE: Very save value (Win% ~90%), only the biggest moves 1.008,
+        "buy_min_fan_magnitude": 0.995,  # NOUVEAU 27/07/2026 — remplace le seuil fixe
+        # fan_magnitude > 1 (voir NOTE momentum). N'exige plus que l'EMA 1h
+        # soit déjà au-dessus de l'EMA 8h, seulement qu'elle s'en rapproche.
     }
+
+    # MOMENTUM ASSOUPLI (27 juillet 2026) : le suivi Telegram (voir
+    # _notify_entry_conditions ci-dessous) montrait "momentum: non" en
+    # continu, avec fan_magnitude quasi toujours < 1 (EMA 1h sous l'EMA 8h en
+    # marché baissier/hésitant) — c'était la condition 'above_1_ok' qui
+    # bloquait systématiquement, indépendamment de l'accélération. Deux
+    # réglages assouplis pour tester :
+    #   - buy_min_fan_magnitude_gain : 1.002 -> 1.0005 (accélération minimale
+    #     exigée réduite, de 0.2% à 0.05% par bougie)
+    #   - fan_magnitude > 1 (fixe) -> fan_magnitude > buy_min_fan_magnitude
+    #     (0.995) : n'exige plus une tendance haussière déjà installée sur
+    #     l'EMA 1h/8h, seulement qu'elle ne soit pas trop éloignée.
+    # À REBACKTESTER avant de considérer ce réglage comme validé — comme pour
+    # les assouplissements précédents (entrée, exit_profit_only), un
+    # assouplissement qui augmente la fréquence peut aussi dégrader le win
+    # rate. Pour l'instant testé uniquement pour "voir si ça déclenche".
     # Sell hyperspace params:
     # NOTE: was 15m but kept bailing out in dryrun
     sell_params = {
@@ -230,7 +250,7 @@ class ichiV1(IStrategy):
         #   3) shift_ok     : accélération sur les N dernières bougies
         #                     (buy_fan_magnitude_shift_value)
         gain_ok = bool(last['fan_magnitude_gain'] >= self.buy_params['buy_min_fan_magnitude_gain'])
-        above_1_ok = bool(last['fan_magnitude'] > 1)
+        above_1_ok = bool(last['fan_magnitude'] > self.buy_params['buy_min_fan_magnitude'])
         shift_ok = all(
             bool(dataframe['fan_magnitude'].shift(x + 1).iloc[-1] < last['fan_magnitude'])
             for x in range(self.buy_params['buy_fan_magnitude_shift_value'])
@@ -256,7 +276,7 @@ class ichiV1(IStrategy):
             f"nuage {senkou_ok}/6 (seuil {senkou_needed}) · "
             f"tendance haussière {bullish_ok}/6 (seuil {bullish_needed}) · "
             f"momentum {flag(fan_ok)} "
-            f"(écart+0.2% {flag(gain_ok)} / EMA1h>EMA8h {flag(above_1_ok)} / "
+            f"(écart+0.05% {flag(gain_ok)} / ratio>{self.buy_params['buy_min_fan_magnitude']} {flag(above_1_ok)} / "
             f"accélération {flag(shift_ok)} — ratio={last['fan_magnitude']:.4f})"
         )
 
@@ -306,7 +326,7 @@ class ichiV1(IStrategy):
             conditions.append(dataframe['trend_close_8h'] > dataframe['trend_open_8h'])
         # Trends magnitude
         conditions.append(dataframe['fan_magnitude_gain'] >= self.buy_params['buy_min_fan_magnitude_gain'])
-        conditions.append(dataframe['fan_magnitude'] > 1)
+        conditions.append(dataframe['fan_magnitude'] > self.buy_params['buy_min_fan_magnitude'])
         for x in range(self.buy_params['buy_fan_magnitude_shift_value']):
             conditions.append(dataframe['fan_magnitude'].shift(x+1) < dataframe['fan_magnitude'])
         if conditions:
